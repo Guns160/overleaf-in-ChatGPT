@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "overleaf-panel": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${PLUGIN_ROOT}/server/server.js"
+      ],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}

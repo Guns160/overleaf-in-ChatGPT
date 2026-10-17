@@ -1,0 +1,80 @@
+'use strict';
+const fs=require('fs'),path=require('path'),os=require('os'),assert=require('assert/strict');
+const {execFile,execFileSync}=require('child_process'),{promisify}=require('util');
+const execute=promisify(execFile);
+const create=require('../server/workspace');
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+async function run(cmd,args,opts={}){try{const r=await execute(cmd,args,{cwd:opts.cwd,env:opts.env||process.env,timeout:opts.timeoutMs||30000,maxBuffer:10000000});return {ok:true,out:r.stdout,err:r.stderr};}catch(e){return {ok:false,out:e.stdout||'',err:e.stderr||e.message,error:e.message};}}
+const root=fs.mkdtempSync(path.join(os.tmpdir(),'overleaf-sched-test-')),id='222222222222222222222222',key='sched-paper';
+const remote=path.join(root,'remote.git'),seed=path.join(root,'seed');
+function git(cwd,args){return execFileSync('git',['-c','user.name=Test','-c','user.email=test@localhost','-c','commit.gpgsign=false','-C',cwd,...args],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();}
+fs.mkdirSync(seed);git(seed,['init','-b','main']);fs.writeFileSync(path.join(seed,'main.tex'),'sched base\n');git(seed,['add','.']);git(seed,['commit','-m','Initial']);git(root,['init','--bare',remote]);git(seed,['remote','add','origin',remote]);git(seed,['push','-u','origin','main']);git(remote,['symbolic-ref','HEAD','refs/heads/main']);
+const delays=[];
+const opts={root:path.join(root,'projects'),stateRoot:path.join(root,'state'),getEntry:async k=>{assert.equal(k,key);return {name:'Scheduling paper',projectId:id,keychainAccount:id};},run,remoteForEntry:()=>remote,authForEntry:async()=>process.env,syncDelayMs:20,retryDelayMs:30,longDelayMs:300,onSchedule:(k,ms)=>delays.push(ms)};
+let workspace=create(opts);let checks=0;const pass=n=>{checks++;console.log('PASS '+n);};
+const stateFile=path.join(root,'state',id+'.json');
+const state=()=>{try{return JSON.parse(fs.readFileSync(stateFile,'utf8'));}catch(_){return {status:'missing'};}};
+function upstream(file){return git(remote,['show','main:'+file]);}
+function remoteEdit(file,content){git(seed,['pull','--ff-only']);fs.writeFileSync(path.join(seed,file),content);git(seed,['add','--',file]);git(seed,['commit','-m','Remote edit']);git(seed,['push']);}
+async function waitFor(predicate,timeout=15000){const end=Date.now()+timeout;while(Date.now()<end){if(predicate())return true;await sleep(20);}return predicate();}
+(async()=>{
+ await workspace.open({projectKey:key});
+ assert(await waitFor(()=>delays.includes(300)),JSON.stringify(delays));
+ assert.equal(state().status,'synced');assert.equal(upstream('main.tex'),'sched base');
+ pass('a clean successful sync schedules the long polling interval');
+ delays.length=0;
+ fs.renameSync(remote,remote+'.gone');
+ const doc=(await workspace.read({projectKey:key,filePath:'main.tex'})).structuredContent;
+ await workspace.save({projectKey:key,filePath:'main.tex',content:'offline one\n',expectedHash:doc.hash});
+ const failures=()=>delays.filter(d=>d>=30);
+ assert(await waitFor(()=>failures().length>=4),JSON.stringify(delays));
+ assert.deepEqual(failures().slice(0,4),[30,60,120,300]);
+ const seen=failures().length;await sleep(450);
+ assert(failures().length>seen&&failures().slice(seen).every(d=>d===300));
+ pass('failures back off exponentially and cap at the long interval');
+ delays.length=0;
+ fs.renameSync(remote+'.gone',remote);
+ assert(await waitFor(()=>state().status==='synced'&&upstream('main.tex')==='offline one'&&delays.includes(300)));
+ delays.length=0;
+ fs.renameSync(remote,remote+'.gone');
+ assert(await waitFor(()=>failures().length>=1),JSON.stringify(delays));
+ assert.equal(failures()[0],30);
+ fs.renameSync(remote+'.gone',remote);
+ assert(await waitFor(()=>state().status==='synced'));
+ pass('any success resets the backoff sequence to the base delay');
+ delays.length=0;
+ const before=state().lastSyncedAt;
+ let syncingWrites=0;const realWrite=fs.writeFileSync;
+ fs.writeFileSync=function(file,...rest){if(String(file)===stateFile+'.tmp'){try{if(JSON.parse(rest[0]).status==='syncing')syncingWrites++;}catch(_){}}return realWrite.call(fs,file,...rest);};
+ try{await sleep(450);}finally{fs.writeFileSync=realWrite;}
+ assert.equal(syncingWrites,0);assert.notEqual(state().lastSyncedAt,before);assert.equal(state().status,'synced');
+ pass('an already-synced quiet cycle never flips through the syncing state');
+ delays.length=0;
+ const doc2=(await workspace.read({projectKey:key,filePath:'main.tex'})).structuredContent;
+ await workspace.save({projectKey:key,filePath:'main.tex',content:'LOCAL sched conflict\n',expectedHash:doc2.hash});
+ remoteEdit('main.tex','REMOTE sched conflict\n');
+ assert(await waitFor(()=>state().status==='conflict'));
+ const quiet=delays.length;await sleep(450);assert.equal(delays.length,quiet);
+ pass('a conflict suspends background polling until it is resolved');
+ await workspace.resolve({projectKey:key,conflictId:state().conflict.id,choices:{'main.tex':'local'}});
+ assert(await waitFor(()=>state().status==='synced'&&upstream('main.tex')==='LOCAL sched conflict'));
+ pass('resolving a conflict resumes normal synchronization');
+ delays.length=0;
+ fs.rmSync(stateFile,{force:true});fs.mkdirSync(stateFile);
+ assert(await waitFor(()=>delays.length>=1,5000),JSON.stringify(delays));
+ assert(delays.at(-1)>=30);
+ fs.rmdirSync(stateFile);
+ assert(await waitFor(()=>state().status==='synced',8000));
+ pass('a crashing state update cannot kill the background sync loop');
+ await workspace.close();
+ const fakeRun=async(cmd,args)=>{if(cmd==='git')return {ok:false,out:'',err:'',timedOut:true,timeoutMs:15000};return run(cmd,args);};
+ const ws2=create({...opts,stateRoot:path.join(root,'state-timeout'),run:fakeRun});
+ await ws2.open({projectKey:key});await sleep(1600);
+ const st=JSON.parse(fs.readFileSync(path.join(root,'state-timeout',id+'.json'),'utf8'));
+ assert.match(st.error,/操作超时（15 秒）：git branch/);
+ await ws2.close();
+ pass('git timeouts report the timeout duration and command context');
+ fs.mkdirSync('/tmp/overleaf-editor-v060',{recursive:true});
+ fs.writeFileSync('/tmp/overleaf-editor-v060/scheduling-results.json',JSON.stringify({passed:true,checks},null,2));
+ console.log('ALL '+checks+' SCHEDULING TESTS PASSED');
+})().catch(e=>{workspace.close();console.error(e.stack);process.exitCode=1;});

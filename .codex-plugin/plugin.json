@@ -1,0 +1,27 @@
+{
+  "name": "overleaf",
+  "version": "0.6.0",
+  "description": "本地 LaTeX 编辑器：代码补全、图片与 PDF 预览，后台同步 Overleaf。",
+  "author": {
+    "name": "Xiao Huang"
+  },
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Overleaf",
+    "shortDescription": "LaTeX 编辑、图片预览与同步",
+    "longDescription": "本地 LaTeX 编辑器：代码补全、图片与 PDF 预览，后台同步 Overleaf。",
+    "developerName": "Xiao Huang",
+    "category": "Education & Research",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "composerIcon": "./assets/overleaf-logo.svg",
+    "logo": "./assets/overleaf-logo.svg",
+    "defaultPrompt": [
+      "@Overleaf 打开本地论文编辑器"
+    ]
+  }
+}
