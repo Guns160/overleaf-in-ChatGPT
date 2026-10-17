@@ -3,7 +3,7 @@ import {createResourceViewer,isResource} from './resource-viewer.mjs';
 import {outlineEntries} from './outline.mjs';
 import {createProjectManager,bindLocalForm} from './projects.mjs';
 const $=id=>document.getElementById(id),sleep=ms=>new Promise(r=>setTimeout(r,ms));
-const state={projects:[],project:null,file:null,hash:null,dirty:false,saving:null,saveError:null,files:[],sync:{},localPath:null,epoch:0,fileEpoch:0,job:null,page:1,pageEpoch:0,compiling:false,rerun:false,uncompiled:false,conflict:null,tabs:[],readOnly:false,asset:false,error:null,draftError:false};
+const state={projects:[],project:null,file:null,hash:null,dirty:false,saving:null,saveError:null,files:[],sync:{},settings:{syncMode:'auto',syncDelayMs:3000},localPath:null,epoch:0,fileEpoch:0,job:null,page:1,pageEpoch:0,compiling:false,rerun:false,uncompiled:false,conflict:null,tabs:[],readOnly:false,asset:false,error:null,draftError:false};
 let changes=0;let seq=1,requestedKey=null,ready=false,saveTimer,compileTimer,polling=false,pendingDraft=null;
 const rpc=new Map(),expandedFolders=new Set();let outlineTimer,indexTimer,outline=[],pageObserver,scrollFrame;const pageQueue=[],pageLoading=new Set();let pageWorkers=0;
 function request(method,params,timeout=90000){const id=seq++;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{rpc.delete(id);reject(Error('请求超时，修改仍保留在编辑器中。'));},timeout);rpc.set(id,{resolve,reject,timer});window.parent.postMessage({jsonrpc:'2.0',id,method,params},'*');});}
@@ -24,11 +24,11 @@ function ui(){
  $('file-name').textContent=state.file||'选择文件';$('save').disabled=!state.file||state.asset||!!state.saving;$('new-file').disabled=!state.project;$('compile').disabled=!state.project||state.compiling;
  $('compile-label').textContent=state.compiling?'Compiling…':'Recompile';
  $('download-pdf').disabled=state.job?.status!=='ready';$('editing-mode').textContent=state.readOnly?'Read only':'✎ Editing⌄';
- const s=state.sync.status,labels={local:'本地工作副本',local_only:'仅本地',pending:'等待后台同步',syncing:'正在同步',synced:'已同步 Overleaf',offline:'同步待重试',conflict:'同步冲突'};
+ const s=state.sync.status,labels={local:'本地工作副本',local_only:'仅本地',pending:state.settings.syncMode==='manual'?'手动模式 · 未同步':'等待后台同步',syncing:'正在同步',synced:'已同步 Overleaf',offline:'同步待重试',conflict:'同步冲突'};
  $('sync-button').disabled=state.project?.type==='local';$('open-web').disabled=!state.project?.projectId;
  $('show-local').textContent=state.project?.type==='local'?'本地项目 · 无需登录':'本地工作副本 · 后台同步';
  $('sync-state').textContent=labels[s]||'等待连接';$('sync-button').classList.toggle('warn',s==='pending'||s==='conflict');$('sync-button').classList.toggle('offline',s==='offline');
- $('sync-button').title=state.sync.error||(state.sync.lastSyncedAt?'上次同步：'+new Date(state.sync.lastSyncedAt).toLocaleString('zh-CN'):'自动将本地修改同步到 Overleaf');
+ $('sync-button').title=state.sync.error||(state.sync.lastSyncedAt?'上次同步：'+new Date(state.sync.lastSyncedAt).toLocaleString('zh-CN'):state.settings.syncMode==='manual'?'点击立即同步到 Overleaf':'自动将本地修改同步到 Overleaf');
  $('file-status').title=state.saveError||state.error||'';
  $('notice').hidden=!state.saveError&&!state.draftError&&!state.error&&s!=='conflict'&&s!=='offline';
  if(state.saveError){$('notice-text').textContent=state.saveError;$('review-conflicts').textContent='比较文件版本';}
@@ -95,6 +95,10 @@ async function refreshStatus(){
  }catch(e){showError(e);}finally{polling=false;}
 }
 async function syncNow(){try{await saveCurrent();if(!state.project)return;await tool('syncProject',{projectKey:state.project.key});state.sync={...state.sync,status:'syncing'};ui();setTimeout(refreshStatus,700);}catch(e){showError(e);}}
+function applySyncSettings(s){if(!s)return;state.settings={...state.settings,...s};$('sync-mode').value=state.settings.syncMode||'auto';$('sync-delay').value=String(Math.round((state.settings.syncDelayMs||3000)/1000));$('sync-delay').disabled=state.settings.syncMode!=='auto';ui();}
+async function saveSyncSettings(){const mode=$('sync-mode').value,seconds=Math.max(1,Math.min(60,Math.round(Number($('sync-delay').value)||3)));try{$('sync-settings-error').textContent='';const r=await tool('updateSettings',{syncMode:mode,syncDelayMs:seconds*1000});applySyncSettings(r);if(mode==='auto'&&state.project?.type==='overleaf')syncNow();}catch(e){$('sync-settings-error').textContent=e.message;}}
+$('sync-mode').onchange=()=>{$('sync-delay').disabled=$('sync-mode').value!=='auto';saveSyncSettings();};
+$('sync-delay').onchange=()=>saveSyncSettings();
 
 function scale(){const width=$('zoom').value==='fit'?Math.max(160,$('reader').clientWidth-28):Math.round(816*Number($('zoom').value));$('pdf-pages').style.width=width+'px';}
 function queuePage(n,job){if(job!==state.job||pageLoading.has(job.buildId+':'+n))return;const node=$('pdf-pages').querySelector('[data-page="'+n+'"]');if(!node||node.dataset.loaded)return;pageLoading.add(job.buildId+':'+n);pageQueue.push({n,job,node});pumpPages();}
@@ -191,4 +195,4 @@ drag('outline-divider',(e,s)=>{$('tree-pane').style.setProperty('--tree-height',
 drag('divider',(e,s)=>{const width=Math.min(s.total-160,Math.max(180,s.width+e.clientX-s.x));$('panes').style.setProperty('--editor',(Math.min(s.total-168,width)/s.total*100)+'%');scale();},()=>({width:$('editor-pane').getBoundingClientRect().width,total:$('panes').clientWidth}));
 $('upload-input').onchange=async()=>{const files=[...$('upload-input').files];$('upload-input').value='';if(!files.length)return;try{await saveCurrent();if(!state.project)return;const done=[],failed=[];for(const file of files){try{if(file.size>1500000)throw Error('超过 1.5 MB 上限');if(!/\.(tex|bib|bst|bbl|cls|sty|txt|md|json|ya?ml|csv)$/i.test(file.name))throw Error('不是支持的文本文件类型');await tool('saveFile',{projectKey:state.project.key,filePath:file.name,content:await file.text(),expectedHash:null});done.push(file.name);}catch(e){failed.push(file.name+'：'+e.message);}}await refreshStatus();scheduleIndex();const box=$('upload-result');box.replaceChildren();box.append(el('p',null,'成功导入 '+done.length+' 个文件'+(failed.length?'，失败 '+failed.length+' 个：':'。')));for(const item of failed)box.append(el('div','upload-fail',item));$('upload-dialog').showModal();}catch(e){showError(e);}};
 ui();if(window.innerWidth<720){layout('editor');$('tree-pane').hidden=true;$('workspace').classList.add('no-files');}
-(async()=>{try{const host=await request('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'Overleaf Local Editor',version:'0.6.0'},appCapabilities:{availableDisplayModes:['inline','fullscreen']}});applyHost(host.hostContext);notify('ui/notifications/initialized',{});const r=await tool('bootstrap');setProjects(r.projects);manager.setup(r);ready=true;let saved;try{saved=localStorage.getItem('overleaf-local:last-project');}catch(_){}const key=[requestedKey,saved,r.projects[0]?.key].find(k=>r.projects.some(p=>p.key===k));if(key)await openProject(key);setInterval(refreshStatus,4000);}catch(e){$('file-status').textContent=e.message;$('placeholder').textContent='编辑器连接失败：'+e.message;}})();
+(async()=>{try{const host=await request('ui/initialize',{protocolVersion:'2026-01-26',appInfo:{name:'Overleaf Local Editor',version:'0.6.0'},appCapabilities:{availableDisplayModes:['inline','fullscreen']}});applyHost(host.hostContext);notify('ui/notifications/initialized',{});const r=await tool('bootstrap');setProjects(r.projects);manager.setup(r);applySyncSettings(r.settings);ready=true;let saved;try{saved=localStorage.getItem('overleaf-local:last-project');}catch(_){}const key=[requestedKey,saved,r.projects[0]?.key].find(k=>r.projects.some(p=>p.key===k));if(key)await openProject(key);setInterval(refreshStatus,4000);}catch(e){$('file-status').textContent=e.message;$('placeholder').textContent='编辑器连接失败：'+e.message;}})();

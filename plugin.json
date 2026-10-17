@@ -1,8 +1,8 @@
 {
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "overleaf",
-  "version": "0.6.0",
-  "description": "本地 LaTeX 编辑器：代码补全、图片与 PDF 预览，后台同步 Overleaf。",
+  "version": "0.7.0",
+  "description": "本地 LaTeX 编辑器：代码补全、图片与 PDF 预览，自动或手动同步 Overleaf。",
   "author": {
     "name": "Xiao Huang"
   },

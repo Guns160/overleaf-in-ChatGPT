@@ -11,7 +11,8 @@ module.exports=function createWorkspace(options){
  const root=options.root||process.env.OVERLEAF_WORKSPACE_ROOT||path.join(os.homedir(),'Documents','Overleaf Local');
  const stateRoot=options.stateRoot||stateDirectory();
  const remoteFor=options.remoteForEntry||(entry=>'https://git@git.overleaf.com/'+entry.projectId);
- const delay=options.syncDelayMs??6000,retryDelay=options.retryDelayMs??30000,longDelay=Math.max(options.longDelayMs??300000,retryDelay*4);
+ const settings=options.settings||require('./settings').createSettings({directory:path.dirname(process.env.OVERLEAF_PROJECTS_MANIFEST||path.join(os.homedir(),'.config/overleaf-mcp/projects.manifest.json'))});
+ const delay=()=>options.syncDelayMs??settings.read().syncDelayMs,retryDelay=options.retryDelayMs??30000,longDelay=Math.max(options.longDelayMs??300000,retryDelay*4);
  const timers=new Map(),active=new Map(),hashCache=new Map(),backoff=new Map();let closed=false;
  fs.mkdirSync(root,{recursive:true,mode:0o700});fs.mkdirSync(path.join(stateRoot,'locks'),{recursive:true,mode:0o700});
  const hooks=path.join(stateRoot,'disabled-hooks');fs.mkdirSync(hooks,{recursive:true});
@@ -178,8 +179,8 @@ module.exports=function createWorkspace(options){
   }catch(e){await abortMerge(repo,entry).catch(()=>{});await update(entry,{status:'offline',error:safeError(e)});return {failed:true};}
   });
  }
- function schedule(key,ms=delay){
-  if(closed)return;
+ function schedule(key,ms=delay()){
+  if(closed||settings.read().syncMode==='manual')return;
   if(timers.has(key))clearTimeout(timers.get(key));
   const timer=setTimeout(()=>{timers.delete(key);start(key).catch(()=>{});},ms);timer.unref?.();timers.set(key,timer);
   try{options.onSchedule?.(key,ms);}catch(_){}
@@ -188,7 +189,7 @@ module.exports=function createWorkspace(options){
   if(outcome&&outcome.conflict){backoff.delete(key);return null;}
   if(outcome&&outcome.failed){const level=Math.min((backoff.get(key)||0)+1,4);backoff.set(key,level);return [retryDelay,retryDelay*2,retryDelay*4,longDelay][level-1];}
   backoff.delete(key);
-  return outcome&&outcome.clean?longDelay:delay;
+  return outcome&&outcome.clean?longDelay:delay();
  }
  async function start(key){
   if(timers.has(key)){clearTimeout(timers.get(key));timers.delete(key);}

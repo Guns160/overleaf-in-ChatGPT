@@ -1,6 +1,6 @@
 # 安装与首次使用
 
-Overleaf Local（v0.6.0，应用内显示为 Overleaf）是非官方的本地桌面插件：服务、项目文件与账号配置都保存在你自己的电脑上。仅安装插件不会让 Overleaf 网页版或手机端读取本机文件。
+Overleaf Local（v0.7.0，应用内显示为 Overleaf）是非官方的本地桌面插件：服务、项目文件与账号配置都保存在你自己的电脑上。仅安装插件不会让 Overleaf 网页版或手机端读取本机文件。
 
 ## 前提条件
 
@@ -14,7 +14,7 @@ Overleaf Local（v0.6.0，应用内显示为 Overleaf）是非官方的本地桌
 
 ## 方式 A：从 GitHub Release 安装（推荐）
 
-1. 打开 <https://github.com/Guns160/overleaf-in-ChatGPT/releases>，下载 v0.6.0 的附件 overleaf-0.6.0.zip。
+1. 打开 <https://github.com/Guns160/overleaf-in-ChatGPT/releases>，下载 v0.7.0 的附件 overleaf-0.7.0.zip。
 2. 打开 ChatGPT / Codex 桌面应用的插件页，选择“添加 → 上传插件压缩包”，选择刚下载的 ZIP 文件。
 3. 安装完成后刷新插件页，打开 Overleaf 插件。
 
@@ -22,7 +22,7 @@ Overleaf Local（v0.6.0，应用内显示为 Overleaf）是非官方的本地桌
 
 如果插件页不支持上传 ZIP：
 
-1. 解压 overleaf-0.6.0.zip，得到 overleaf 文件夹。
+1. 解压 overleaf-0.7.0.zip，得到 overleaf 文件夹。
 2. 在终端进入该文件夹，运行：
 
    ```bash
@@ -74,7 +74,7 @@ npm run build
 
 ### 2. 导入 Overleaf 项目
 
-选择 File → 导入 Overleaf，选择账号并填写项目链接和真实项目名称。导入的工作副本保存在 ~/Documents/Overleaf Local/项目ID/，之后默认约 6 秒在后台同步；出现冲突时双方内容都会保留，等待你在本地选择处理方式。插件关闭后本地文件保留，下次打开继续同步。
+选择 File → 导入 Overleaf，选择账号并填写项目链接和真实项目名称。导入的工作副本保存在 ~/Documents/Overleaf Local/项目ID/，之后默认自动同步：保存后约 3 秒推送到 Overleaf（可在"编辑器设置"中改为 1–60 秒，或切换为手动模式、点击同步按钮推送）；出现冲突时双方内容都会保留，等待你在本地选择处理方式。插件关闭后本地文件保留，下次打开继续同步。
 
 ### 3. 打开或新建本地项目
 

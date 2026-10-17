@@ -1,6 +1,6 @@
 # Overleaf Local · ChatGPT/Codex 桌面端本地 LaTeX 编辑器
 
-Overleaf Local（v0.6.0）是非官方、本地优先的 LaTeX 编辑器插件，以插件视图运行在 ChatGPT / Codex 桌面应用中（插件在应用内显示为 Overleaf）。文件树、源码编辑器与 PDF 预览三栏并排，布局接近 Overleaf 网页版；支持本地 LaTeX 代码补全、项目图片与 PDF 预览，并可用你自己的 Overleaf 账号 Git 令牌在后台同步项目。
+Overleaf Local（v0.7.0）是非官方、本地优先的 LaTeX 编辑器插件，以插件视图运行在 ChatGPT / Codex 桌面应用中（插件在应用内显示为 Overleaf）。文件树、源码编辑器与 PDF 预览三栏并排，布局接近 Overleaf 网页版；支持本地 LaTeX 代码补全、项目图片与 PDF 预览，并可用你自己的 Overleaf 账号 Git 令牌同步项目（默认自动后台同步，也可切换为手动）。
 
 论文、令牌与编译结果都保存在你自己的电脑上，插件不收集、不上传论文内容。
 
@@ -51,7 +51,8 @@ Overleaf Local（v0.6.0）是非官方、本地优先的 LaTeX 编辑器插件�
 
 - 打开已有文件夹：直接编辑所选目录，不复制文件、不初始化 Git、不更改原有 Git 远端；多个主文件时明确选择。
 - 新建项目：填写名称、中文/英文模板与保存位置，生成 main.tex 后立即进入编辑器；目标目录已存在时拒绝覆盖。本地项目不要求登录、无需 Git、不自动上传；新建的不是 Overleaf 云端项目。
-- 已导入的 Overleaf 项目默认约 6 秒后台同步，失败约 30 秒后重试。同步先获取远端更新，再合并、提交，不强制推送；冲突时保留双方内容等待你选择。插件关闭后本地文件保留，下次打开继续同步。
+- 已导入的 Overleaf 项目默认自动后台同步：保存后默认等待约 3 秒即推送，等待时长可在设置中调整为 1–60 秒；失败约 30 秒后重试。同步先获取远端更新，再合并、提交，不强制推送；冲突时保留双方内容等待你选择。插件关闭后本地文件保留，下次打开继续同步。
+- 同步模式可在"编辑器设置"中切换：自动同步（默认）保存后自动推送；手动同步则只在点击顶栏同步按钮（立即同步）时推送。顶栏同步按钮在两种模式下都可随时手动触发一次同步。
 - 不同文件与项目的撤销记录隔离；保存携带内容版本，拒绝覆盖另一窗口的新修改。
 
 ### 性能
@@ -62,7 +63,7 @@ Overleaf Local（v0.6.0）是非官方、本地优先的 LaTeX 编辑器插件�
 
 | 方式 | 适用人群 | 概述 |
 | --- | --- | --- |
-| Release ZIP 手动上传 | 普通用户（推荐） | 从 GitHub Release 下载 overleaf-0.6.0.zip，在桌面应用插件页上传安装 |
+| Release ZIP 手动上传 | 普通用户（推荐） | 从 GitHub Release 下载 overleaf-0.7.0.zip，在桌面应用插件页上传安装 |
 | 源码安装 | 开发者 | git clone 本仓库后运行 node scripts/install-local.cjs |
 
 完整步骤（含 --dry-run、--codex 参数说明与首次使用引导）见 [INSTALL.md](INSTALL.md)。
@@ -71,6 +72,7 @@ Overleaf Local（v0.6.0）是非官方、本地优先的 LaTeX 编辑器插件�
 
 - 本地优先：论文源文件、编译结果与缓存全部保存在本机；插件不收集、不上传论文内容。
 - Git 令牌只保存在本机系统安全存储：macOS Keychain、Windows 当前用户 DPAPI、Linux Secret Service；不使用明文令牌文件。
+- 同步设置（自动/手动模式与防抖秒数）保存在 ~/.config/overleaf-mcp/settings.json，仅含使用偏好，不含任何凭据或论文内容。
 - 安装包（Release ZIP）只包含代码、界面与文档，不含任何账号、令牌、论文、项目登记或缓存。
 - 纯本地项目无需登录；只有导入 Overleaf 项目时才需要连接你自己的账号。
 
@@ -115,6 +117,7 @@ npm run build
 node tests/registry.test.cjs
 node tests/workspace.test.cjs
 node tests/completion.test.mjs
+node tests/settings.test.cjs
 node tests/scheduling.test.cjs
 node tests/cache-cleanup.test.cjs
 node tests/performance-index.test.cjs

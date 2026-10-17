@@ -3,6 +3,7 @@ const fs=require('fs'),path=require('path'),os=require('os'),assert=require('ass
 const {execFile,execFileSync}=require('child_process'),{promisify}=require('util');
 const execute=promisify(execFile);
 const create=require('../server/workspace');
+const createSettings=require('../server/settings').createSettings;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function run(cmd,args,opts={}){try{const r=await execute(cmd,args,{cwd:opts.cwd,env:opts.env||process.env,timeout:opts.timeoutMs||30000,maxBuffer:10000000});return {ok:true,out:r.stdout,err:r.stderr};}catch(e){return {ok:false,out:e.stdout||'',err:e.stderr||e.message,error:e.message};}}
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'overleaf-sched-test-')),id='222222222222222222222222',key='sched-paper';
@@ -10,7 +11,7 @@ const remote=path.join(root,'remote.git'),seed=path.join(root,'seed');
 function git(cwd,args){return execFileSync('git',['-c','user.name=Test','-c','user.email=test@localhost','-c','commit.gpgsign=false','-C',cwd,...args],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();}
 fs.mkdirSync(seed);git(seed,['init','-b','main']);fs.writeFileSync(path.join(seed,'main.tex'),'sched base\n');git(seed,['add','.']);git(seed,['commit','-m','Initial']);git(root,['init','--bare',remote]);git(seed,['remote','add','origin',remote]);git(seed,['push','-u','origin','main']);git(remote,['symbolic-ref','HEAD','refs/heads/main']);
 const delays=[];
-const opts={root:path.join(root,'projects'),stateRoot:path.join(root,'state'),getEntry:async k=>{assert.equal(k,key);return {name:'Scheduling paper',projectId:id,keychainAccount:id};},run,remoteForEntry:()=>remote,authForEntry:async()=>process.env,syncDelayMs:20,retryDelayMs:30,longDelayMs:300,onSchedule:(k,ms)=>delays.push(ms)};
+const opts={root:path.join(root,'projects'),stateRoot:path.join(root,'state'),getEntry:async k=>{assert.equal(k,key);return {name:'Scheduling paper',projectId:id,keychainAccount:id};},run,remoteForEntry:()=>remote,authForEntry:async()=>process.env,syncDelayMs:20,retryDelayMs:30,longDelayMs:300,onSchedule:(k,ms)=>delays.push(ms),settings:createSettings({directory:path.join(root,'settings')})};
 let workspace=create(opts);let checks=0;const pass=n=>{checks++;console.log('PASS '+n);};
 const stateFile=path.join(root,'state',id+'.json');
 const state=()=>{try{return JSON.parse(fs.readFileSync(stateFile,'utf8'));}catch(_){return {status:'missing'};}};
@@ -74,6 +75,26 @@ async function waitFor(predicate,timeout=15000){const end=Date.now()+timeout;whi
  assert.match(st.error,/操作超时（15 秒）：git branch/);
  await ws2.close();
  pass('git timeouts report the timeout duration and command context');
+ opts.settings.update({syncMode:'manual'});
+ const ws3=create(opts),beforeManual=delays.length;
+ await ws3.open({projectKey:key});
+ await sleep(120);assert.equal(delays.length,beforeManual);
+ pass('manual mode does not schedule anything when a project opens');
+ const doc3=(await ws3.read({projectKey:key,filePath:'main.tex'})).structuredContent;
+ await ws3.save({projectKey:key,filePath:'main.tex',content:'manual save\n',expectedHash:doc3.hash});
+ await sleep(120);assert.equal(delays.length,beforeManual);assert.equal(state().status,'pending');
+ pass('manual mode keeps saves pending without any background scheduling');
+ const manualSync=await ws3.sync({projectKey:key});
+ assert.equal(manualSync.structuredContent.sync.status,'synced');assert.equal(upstream('main.tex'),'manual save');
+ await sleep(120);assert.equal(delays.length,beforeManual);
+ pass('manual mode still pushes immediately through the explicit sync tool');
+ opts.settings.update({syncMode:'auto'});
+ const doc4=(await ws3.read({projectKey:key,filePath:'main.tex'})).structuredContent;
+ await ws3.save({projectKey:key,filePath:'main.tex',content:'auto resumed\n',expectedHash:doc4.hash});
+ assert(await waitFor(()=>delays.length>beforeManual),JSON.stringify(delays));
+ assert(await waitFor(()=>state().status==='synced'&&upstream('main.tex')==='auto resumed'));
+ await ws3.close();
+ pass('switching back to auto mode restores background scheduling');
  fs.mkdirSync('/tmp/overleaf-editor-v060',{recursive:true});
  fs.writeFileSync('/tmp/overleaf-editor-v060/scheduling-results.json',JSON.stringify({passed:true,checks},null,2));
  console.log('ALL '+checks+' SCHEDULING TESTS PASSED');

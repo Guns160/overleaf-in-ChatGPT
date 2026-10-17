@@ -1,7 +1,7 @@
 'use strict';
 const fs=require('fs'),os=require('os'),path=require('path'),{spawn}=require('child_process');
 process.env.PATH=['/opt/homebrew/bin','/usr/local/bin','/usr/bin','/bin',process.env.PATH||''].join(path.delimiter);
-const VERSION='0.6.0',UI='ui://overleaf/editor-v6';
+const VERSION='0.7.0',UI='ui://overleaf/editor-v7';
 const children=new Set();
 process.on('unhandledRejection',e=>{try{process.stderr.write('[overleaf-panel] 未处理的异步错误：'+String((e&&e.stack)||e).slice(-2000)+'\n');}catch(_){}});
 const MANIFEST=process.env.OVERLEAF_PROJECTS_MANIFEST||path.join(os.homedir(),'.config/overleaf-mcp/projects.manifest.json');
@@ -17,8 +17,9 @@ function run(command,args,options={}){return new Promise(resolve=>{
 });}
 const registry=require('./registry')({run,manifest:MANIFEST});
 async function getEntry(key){return registry.getEntry(key);}
+const settings=require('./settings').createSettings({directory:path.dirname(MANIFEST)});
 const localRemote=process.env.OVERLEAF_LOCAL_REMOTE_ROOT;
-const workspace=require('./workspace')({getEntry,run,...(localRemote?{remoteForEntry:e=>path.join(localRemote,e.projectId+'.git'),authForEntry:async()=>process.env}:{})});
+const workspace=require('./workspace')({getEntry,run,settings,...(localRemote?{remoteForEntry:e=>path.join(localRemote,e.projectId+'.git'),authForEntry:async()=>process.env}:{})});
 const preview=require('./preview')({CACHE_ROOT,getEntry,workspace,run});
 const resources=require('./resource-preview')({CACHE_ROOT,workspace,run});
 const icon=[{src:'data:image/svg+xml;base64,'+fs.readFileSync(path.join(__dirname,'../assets/overleaf-logo.svg')).toString('base64'),mimeType:'image/svg+xml',sizes:['20x20']}];
@@ -43,6 +44,8 @@ define('listFiles','文件列表','列出本地工作副本的文件。',key,['p
 define('readFile','读取本地源文件','读取本地源文件的完整内容和内容哈希。',{...key,filePath:{type:'string'}},['projectKey','filePath']);
 define('saveFile','保存本地源文件','原子保存编辑内容到本地；内容版本不匹配时拒绝覆盖，保存后后台同步。',{...key,filePath:{type:'string'},content:{type:'string'},expectedHash:{type:['string','null']}},['projectKey','filePath','content','expectedHash'],false);
 define('syncProject','后台同步','后台拉取、合并和推送本地修改，不强制推送。',key,['projectKey'],false);
+define('getSettings','同步设置','读取自动/手动同步模式与自动同步防抖等待时长。',{},[]);
+define('updateSettings','更新同步设置','切换自动/手动同步，或调整自动同步防抖等待时长（毫秒）。',{syncMode:{enum:['auto','manual']},syncDelayMs:{type:'integer',minimum:1000,maximum:60000}},[],false);
 define('conflictDetails','同步冲突差异','读取冲突文件的本地版本和 Overleaf 版本。',key,['projectKey']);
 define('resolveConflicts','处理同步冲突','按用户对每个冲突文件的选择保留版本并同步；不会静默覆盖。',{...key,conflictId:{type:'string'},choices:{type:'object',additionalProperties:{enum:['local','remote']}}},['projectKey','conflictId','choices'],false);
 define('startPreview','编译本地 PDF','从本地已保存内容创建独立副本并编译，不等待或读取远端更新。',{...key,force:{type:'boolean'}},['projectKey']);
@@ -51,7 +54,7 @@ define('previewPage','PDF 页面','读取本地编译 PDF 的一页。',{buildId
 define('resourcePreview','预览项目图片与 PDF','读取项目中的图片、PDF 或兼容 PDF 的 AI 文件，并生成只读预览。',{...key,filePath:{type:'string'},page:{type:'integer',minimum:1}},['projectKey','filePath']);
 define('completionIndex','LaTeX 补全索引','读取当前本地项目中的标签、引用键、自定义命令及文件路径。',key,['projectKey']);
 define('exportPreview','导出 PDF','将已编译 PDF 导出到本机下载目录中的 Overleaf Local 文件夹，不覆盖已有文件。',{buildId:{type:'string'}},['buildId'],false);
-for(const t of tools){if(['openProject','projectStatus','readFile','saveFile','syncProject','conflictDetails'].includes(t.name.split('.')[1]))t._meta.ui.visibility=['model','app'];}
+for(const t of tools){if(['openProject','projectStatus','readFile','saveFile','syncProject','conflictDetails','getSettings','updateSettings'].includes(t.name.split('.')[1]))t._meta.ui.visibility=['model','app'];}
 function listProjects(){return registry.listProjects();}
 function folderPickerAvailable(){return !!clientCapabilities.extensions?.['openai/elicitation']?.form;}
 function requestClient(method,params){const id='picker-'+clientSequence++;return new Promise((resolve,reject)=>{const timer=setTimeout(()=>{clientRequests.delete(id);reject(Error('文件夹选择已超时，可粘贴本地路径。'));},150000);clientRequests.set(id,{resolve,reject,timer});process.stdout.write(JSON.stringify({jsonrpc:'2.0',id,method,params})+'\n');});}
@@ -60,7 +63,9 @@ function result(data,text){return {content:[{type:'text',text:text||'Overleaf �
 async function call(name,args){
  if(['overleaf.browse','overleaf.tray','overleaf.editor','overleaf.preview'].includes(name))return result({projects:listProjects(),projectKey:args.projectKey||null});
  if(name==='overleaf.listProjects')return result({projects:listProjects()});
- if(name==='overleaf.bootstrap')return result({projects:listProjects(),accounts:registry.listAccounts(),features:{folderPicker:folderPickerAvailable(),platform:process.platform,localProjects:true},version:VERSION});
+ if(name==='overleaf.bootstrap')return result({projects:listProjects(),accounts:registry.listAccounts(),features:{folderPicker:folderPickerAvailable(),platform:process.platform,localProjects:true},version:VERSION,settings:settings.read()});
+ if(name==='overleaf.getSettings')return result(settings.read(),'当前同步设置。');
+ if(name==='overleaf.updateSettings')return result(settings.update(args),'同步设置已更新。');
  if(name==='overleaf.resourcePreview')return resources.preview(args);
  if(name==='overleaf.completionIndex')return require('./latex-index').projectIndex(workspace,args);
  if(name==='overleaf.pickDirectory')return result(await pickDirectory());
